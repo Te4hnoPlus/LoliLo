@@ -1,0 +1,4 @@
+name: LoliLo
+version: '${version}'
+main: plus.lolilo.LoliLo
+author: HomaPlus
