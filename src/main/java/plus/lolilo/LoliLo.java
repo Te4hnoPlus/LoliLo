@@ -28,12 +28,16 @@ public final class LoliLo extends JavaPlugin {
             Bukkit.getScheduler().runTaskLaterAsynchronously(this, () -> {
                 ClassLoader curLoader = LoliLo.this.getClassLoader();
                 if(curLoader instanceof SecureClassLoader) {
-                    int count = DomainProcessor.runFixes(LoliLo.this, (SecureClassLoader) curLoader);
-                    getLogger().info("Lolilo saved "+count+"bytes!");
-                } else {
-                    getLogger().warning("Lolilo classloader changed!");
-                    getLogger().warning("Lolilo can`t trim loader ["+curLoader.getClass()+"]");
+                    int count;
+                    try {
+                        count = DomainProcessor.runFixes(LoliLo.this, (SecureClassLoader) curLoader);
+                        getLogger().info("Lolilo saved "+count+"bytes!");
+                        getPluginLoader().disablePlugin(LoliLo.this);
+                        return;
+                    } catch (Exception ignored) {}
                 }
+                getLogger().warning("Lolilo classloader changed!");
+                getLogger().warning("Lolilo can`t trim loader ["+curLoader.getClass()+"]");
                 getPluginLoader().disablePlugin(LoliLo.this);
             }, delay);
         } else {

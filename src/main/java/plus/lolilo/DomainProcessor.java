@@ -1,5 +1,7 @@
 package plus.lolilo;
 
+import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.java.JavaPlugin;
 import sun.misc.Unsafe;
 import java.lang.reflect.Field;
 import java.security.Permission;
@@ -7,6 +9,7 @@ import java.security.PermissionCollection;
 import java.security.ProtectionDomain;
 import java.security.SecureClassLoader;
 import java.util.Enumeration;
+import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -25,10 +28,10 @@ public class DomainProcessor {
 
 
     /**
-     * Try to trim classloader
+     * Run trimmer for all known classloaders
      * @return mean saved bytes
      */
-    public static int runFixes(LoliLo lolilo, SecureClassLoader loader){
+    public static int runFixes(LoliLo lolilo, SecureClassLoader loader) throws Exception{
         //use local variables to avoid store data in heap
         Unsafe unsafe;
         try {
@@ -36,23 +39,57 @@ public class DomainProcessor {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+        IdentityHashMap<SecureClassLoader,Object> loaders;
+
         AtomicInteger count;
-        runFixes(unsafe, lolilo, loader, count = new AtomicInteger());
+        runFixesRec(unsafe, lolilo, loader, count = new AtomicInteger(), loaders = new IdentityHashMap<>());
+
+        long loaderOff = offset(unsafe, JavaPlugin.class, "classLoader");
+
+        for (Plugin plug:lolilo.getServer().getPluginManager().getPlugins()){
+            if(plug instanceof JavaPlugin){
+                ClassLoader loader0 = (ClassLoader)unsafe.getObject(plug, loaderOff);
+                if(loader0 instanceof SecureClassLoader){
+                    runFixesRec(unsafe, lolilo, loader, count, loaders);
+                }
+            }
+        }
 
         int coef;
-        try {
-            String strValue = "value";
-            if(unsafe.getObject(strValue, offset(unsafe, String.class, strValue)).getClass() == char[].class)
-                coef = 16;
-            else
-                coef = 8;
-        } catch (NoSuchFieldException e) {
-            throw new RuntimeException(e);
-        }
+        String strValue = "value";
+        if(unsafe.getObject(strValue, offset(unsafe, String.class, strValue)).getClass() == char[].class)
+            coef = 16;
+        else
+            coef = 8;
         return count.get() * coef;
     }
 
 
+    /**
+     * Run fixes for classloader and parents
+     */
+    private static void runFixesRec(Unsafe unsafe, LoliLo lolilo, SecureClassLoader loader, AtomicInteger count, IdentityHashMap<SecureClassLoader,Object> loaders){
+        if(loaders.containsKey(loader))return;
+        loaders.put(loader,loader);
+        runFixes(unsafe, lolilo, loader, count);
+
+        ClassLoader parent = loader.getParent();
+        while (parent != null){
+            if(parent instanceof SecureClassLoader){
+                if(!loaders.containsKey(loader)) {
+                    loaders.put(loader, loader);
+                    runFixes(unsafe, lolilo, (SecureClassLoader) parent, count);
+                }
+            }
+            ClassLoader next = parent.getParent();
+            if(next != parent)parent = next;
+        }
+    }
+
+
+    /**
+     * Run fixes for classloader
+     */
     private static void runFixes(Unsafe unsafe, LoliLo lolilo, SecureClassLoader loader, AtomicInteger count){
         try {
             //use local variables to avoid store data in heap
@@ -101,7 +138,7 @@ public class DomainProcessor {
                 Enumeration<Permission> perms = pc.elements();
                 while (perms.hasMoreElements()) {
                     Permission perm = perms.nextElement();
-                    count.addAndGet(perm.getName().length());
+                    count.addAndGet(perm.getName().length()+12); //12 - sum of ref bytes len
                     unsafe.putObject(perm, nameOff, "");
                 }
             }
