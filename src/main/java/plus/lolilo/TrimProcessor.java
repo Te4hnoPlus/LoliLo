@@ -106,7 +106,7 @@ public class TrimProcessor {
 //            Object classes0 = unsafe.getObject(loader, classesOff);
 //            if(classes0 instanceof List) {
 //                List<Class<?>> classes = (List<Class<?>>) classes0;
-            List<Class<?>> classes = (List<Class<?>>)unsafe.getObject(loader, 48);
+            List<Class<?>> classes = (List<Class<?>>)unsafe.getObject(loader, 48L);
             synchronized (classes) {
                 classes.forEach(aClass -> clearCachedReflects(unsafe, aClass, reflectCache, cachedCtor, count));
             }
