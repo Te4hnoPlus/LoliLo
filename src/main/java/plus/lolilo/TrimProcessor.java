@@ -1,13 +1,12 @@
 package plus.lolilo;
 
+import com.google.common.collect.ImmutableList;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.PluginDescriptionFile;
 import org.bukkit.plugin.java.JavaPlugin;
 import sun.misc.Unsafe;
 import java.lang.reflect.Field;
-import java.security.Permission;
-import java.security.PermissionCollection;
-import java.security.ProtectionDomain;
-import java.security.SecureClassLoader;
+import java.security.*;
 import java.util.Enumeration;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -40,6 +39,13 @@ public class TrimProcessor {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+        int coef;
+        String strValue = "value";
+        if(unsafe.getObject(strValue, offset(unsafe, String.class, strValue)).getClass() == char[].class)
+            coef = 16;
+        else
+            coef = 8;
+
         IdentityHashMap<ClassLoader,ClassLoader> loaders;
 
         AtomicInteger count;
@@ -47,23 +53,37 @@ public class TrimProcessor {
 
         long loaderOff = offset(unsafe, JavaPlugin.class, "classLoader");
 
+        long[] listsOff = new long[]{
+                offset(unsafe, PluginDescriptionFile.class, "depend"),
+                offset(unsafe, PluginDescriptionFile.class, "softDepend"),
+                offset(unsafe, PluginDescriptionFile.class, "loadBefore")
+        };
+        long webSiteOff = offset(unsafe, PluginDescriptionFile.class,"website");
+
         for (Plugin plug:lolilo.getServer().getPluginManager().getPlugins()){
             if(plug instanceof JavaPlugin){
                 ClassLoader loader0 = (ClassLoader)unsafe.getObject(plug, loaderOff);
+
                 if(loader0 instanceof SecureClassLoader){
                     runFixesRec(unsafe, lolilo, (SecureClassLoader)loader0, count, loaders);
+                }
+                PluginDescriptionFile description = plug.getDescription();
+
+                if(description != null){
+                    ImmutableList<String> empty = ImmutableList.of();
+                    for (long off:listsOff){
+                        ImmutableList<String> prev = (ImmutableList<String>)unsafe.getAndSetObject(description, off, empty);
+                        for (String str:prev) count.addAndGet(str.length()+16);
+                        if(!prev.isEmpty())count.addAndGet(16);
+                    }
+                    Object prevWeb = unsafe.getAndSetObject(description, webSiteOff, "https://github.com/Te4hnoPlus");
+                    if(prevWeb != null) count.addAndGet(((String)prevWeb).length()+12);
                 }
             }
         }
 
         clearCachedReflects(unsafe, loaders, count);
 
-        int coef;
-        String strValue = "value";
-        if(unsafe.getObject(strValue, offset(unsafe, String.class, strValue)).getClass() == char[].class)
-            coef = 16;
-        else
-            coef = 8;
         return count.get() * coef;
     }
 
@@ -76,25 +96,26 @@ public class TrimProcessor {
         long cachedCtor   = offset(unsafe, Class.class, "cachedConstructor");
 
         loaders.forEach((loader, unused) -> {
-            Class<?> curClazz;
-            long classesOff;
-            try {
-                classesOff = offset(unsafe, curClazz = loader.getClass(), "classes");
-            } catch (Exception e) {
-                return;
+            Class<?> curClazz = loader.getClass();
+//            long classesOff;
+//            try {
+//                classesOff = offset(unsafe, curClazz, "classes");
+//            } catch (Exception e) {
+//                return;
+//            }
+//            Object classes0 = unsafe.getObject(loader, classesOff);
+//            if(classes0 instanceof List) {
+//                List<Class<?>> classes = (List<Class<?>>) classes0;
+            List<Class<?>> classes = (List<Class<?>>)unsafe.getObject(loader, 48);
+            synchronized (classes) {
+                classes.forEach(aClass -> clearCachedReflects(unsafe, aClass, reflectCache, cachedCtor, count));
             }
-            Object classes0 = unsafe.getObject(loader, classesOff);
-            if(classes0 instanceof List) {
-                List<Class<?>> classes = (List<Class<?>>) classes0;
-                synchronized (classes) {
-                    classes.forEach(aClass -> clearCachedReflects(unsafe, aClass, reflectCache, cachedCtor, count));
-                }
-            } else if(classes0 instanceof Map){
-                Map<?,Class<?>> classes = (Map<?,Class<?>>) classes0;
-                synchronized (classes) {
-                    classes.forEach((key, aClass) -> clearCachedReflects(unsafe, aClass, reflectCache, cachedCtor, count));
-                }
-            }
+//            } else if(classes0 instanceof Map){
+//                Map<?,Class<?>> classes = (Map<?,Class<?>>) classes0;
+//                synchronized (classes) {
+//                    classes.forEach((key, aClass) -> clearCachedReflects(unsafe, aClass, reflectCache, cachedCtor, count));
+//                }
+//            }
             clearCachedReflects(unsafe, curClazz, reflectCache, cachedCtor, count);
         });
     }
