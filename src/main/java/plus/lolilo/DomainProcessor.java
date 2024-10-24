@@ -10,6 +10,7 @@ import java.security.ProtectionDomain;
 import java.security.SecureClassLoader;
 import java.util.Enumeration;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -39,7 +40,7 @@ public class DomainProcessor {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        IdentityHashMap<SecureClassLoader,Object> loaders;
+        IdentityHashMap<ClassLoader,ClassLoader> loaders;
 
         AtomicInteger count;
         runFixesRec(unsafe, lolilo, loader, count = new AtomicInteger(), loaders = new IdentityHashMap<>());
@@ -50,10 +51,12 @@ public class DomainProcessor {
             if(plug instanceof JavaPlugin){
                 ClassLoader loader0 = (ClassLoader)unsafe.getObject(plug, loaderOff);
                 if(loader0 instanceof SecureClassLoader){
-                    runFixesRec(unsafe, lolilo, loader, count, loaders);
+                    runFixesRec(unsafe, lolilo, (SecureClassLoader)loader0, count, loaders);
                 }
             }
         }
+
+        clearCachedReflects(unsafe, loaders, count);
 
         int coef;
         String strValue = "value";
@@ -66,9 +69,52 @@ public class DomainProcessor {
 
 
     /**
+     * Clear cached reflection data in all loaded classes
+     */
+    private static void clearCachedReflects(Unsafe unsafe, IdentityHashMap<ClassLoader,ClassLoader> loaders, AtomicInteger count) throws Exception {
+        long reflectCache = offset(unsafe, Class.class, "reflectionData");
+        long cachedCtor   = offset(unsafe, Class.class, "cachedConstructor");
+
+        loaders.forEach((loader, unused) -> {
+            Class<?> curClazz;
+            long classesOff;
+            try {
+                classesOff = offset(unsafe, curClazz = loader.getClass(), "classes");
+            } catch (Exception e) {
+                return;
+            }
+            Object classes0 = unsafe.getObject(loader, classesOff);
+            if(classes0 instanceof List) {
+                List<Class<?>> classes = (List<Class<?>>) classes0;
+                synchronized (classes) {
+                    classes.forEach(aClass -> clearCachedReflects(unsafe, aClass, reflectCache, cachedCtor, count));
+                }
+            } else if(classes0 instanceof Map){
+                Map<?,Class<?>> classes = (Map<?,Class<?>>) classes0;
+                synchronized (classes) {
+                    classes.forEach((key, aClass) -> clearCachedReflects(unsafe, aClass, reflectCache, cachedCtor, count));
+                }
+            }
+            clearCachedReflects(unsafe, curClazz, reflectCache, cachedCtor, count);
+        });
+    }
+
+
+    /**
+     * Clear cached reflection data in target class
+     */
+    private static void clearCachedReflects(Unsafe unsafe, Class<?> clazz, long reflectCache, long cachedCtor, AtomicInteger count){
+        Object prev = unsafe.getAndSetObject(clazz, reflectCache, null);
+        if(prev != null)count.addAndGet(80);
+        prev = unsafe.getAndSetObject(clazz, cachedCtor, null);
+        if(prev != null)count.addAndGet(80);
+    }
+
+
+    /**
      * Run fixes for classloader and parents
      */
-    private static void runFixesRec(Unsafe unsafe, LoliLo lolilo, SecureClassLoader loader, AtomicInteger count, IdentityHashMap<SecureClassLoader,Object> loaders){
+    private static void runFixesRec(Unsafe unsafe, LoliLo lolilo, SecureClassLoader loader, AtomicInteger count, IdentityHashMap<ClassLoader,ClassLoader> loaders){
         if(loaders.containsKey(loader))return;
         loaders.put(loader,loader);
         runFixes(unsafe, lolilo, loader, count);
@@ -76,13 +122,25 @@ public class DomainProcessor {
         ClassLoader parent = loader.getParent();
         while (parent != null){
             if(parent instanceof SecureClassLoader){
-                if(!loaders.containsKey(loader)) {
-                    loaders.put(loader, loader);
+                if(!loaders.containsKey(parent)) {
+                    loaders.put(parent, parent);
                     runFixes(unsafe, lolilo, (SecureClassLoader) parent, count);
                 }
-            }
+            } else loaders.put(parent, parent);
             ClassLoader next = parent.getParent();
             if(next != parent)parent = next;
+        }
+
+        parent = loader.getClass().getClassLoader();
+
+        while (parent != null){
+            if(parent instanceof SecureClassLoader){
+                if(!loaders.containsKey(parent)) {
+                    loaders.put(parent, parent);
+                    runFixes(unsafe, lolilo, (SecureClassLoader) parent, count);
+                }
+            } else loaders.put(parent, parent);
+            parent = parent.getClass().getClassLoader();
         }
     }
 
@@ -123,7 +181,7 @@ public class DomainProcessor {
     /**
      * @return offset of object field
      */
-    private static long offset(Unsafe unsafe, Class<?> clazz, String name) throws NoSuchFieldException {
+    private static long offset(Unsafe unsafe, Class<?> clazz, String name) throws Exception {
         return unsafe.objectFieldOffset(clazz.getDeclaredField(name));
     }
 
@@ -131,7 +189,7 @@ public class DomainProcessor {
     /**
      * Trim permissions in domains
      */
-    private static void forMap(Unsafe unsafe, Map<?, ProtectionDomain> domains, AtomicInteger count, long nameOff) throws NoSuchFieldException {
+    private static void forMap(Unsafe unsafe, Map<?, ProtectionDomain> domains, AtomicInteger count, long nameOff) {
         domains.forEach((obj, pd) -> {
             PermissionCollection pc = pd.getPermissions();
             if (pc != null) {

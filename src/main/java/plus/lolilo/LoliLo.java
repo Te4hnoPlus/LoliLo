@@ -34,9 +34,12 @@ public final class LoliLo extends JavaPlugin {
                         getLogger().info("Lolilo saved "+count+"bytes!");
                         getPluginLoader().disablePlugin(LoliLo.this);
                         return;
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                } else {
+                    getLogger().warning("Lolilo classloader changed!");
                 }
-                getLogger().warning("Lolilo classloader changed!");
                 getLogger().warning("Lolilo can`t trim loader ["+curLoader.getClass()+"]");
                 getPluginLoader().disablePlugin(LoliLo.this);
             }, delay);
