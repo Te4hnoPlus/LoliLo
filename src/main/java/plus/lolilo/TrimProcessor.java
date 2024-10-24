@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 
 
-public class DomainProcessor {
+public class TrimProcessor {
     /**
      * @return Unsafe instance
      */

@@ -30,7 +30,7 @@ public final class LoliLo extends JavaPlugin {
                 if(curLoader instanceof SecureClassLoader) {
                     int count;
                     try {
-                        count = DomainProcessor.runFixes(LoliLo.this, (SecureClassLoader) curLoader);
+                        count = TrimProcessor.runFixes(LoliLo.this, (SecureClassLoader) curLoader);
                         getLogger().info("Lolilo saved "+count+"bytes!");
                         getPluginLoader().disablePlugin(LoliLo.this);
                         return;
